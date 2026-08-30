@@ -1,14 +1,15 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { createClient, isSupabaseConfigured } from '@/lib/supabase/client';
 import { Wallet, Loader2, ShieldCheck, TrendingUp, Target, ArrowLeft } from 'lucide-react';
-import { Field, Input, Button } from '@/components/ui';
-import { cn } from '@/lib/utils';
+import { getSupabaseClient, isSupabaseConfigured } from '@/lib/supabase/client';
+import { enterGuestMode } from '@/lib/guest';
+import { SignIn } from '@/components/auth/SignIn';
+import { SignUp } from '@/components/auth/SignUp';
 
-type Mode = 'signin' | 'signup';
+type View = 'signin' | 'signup';
 
 const HIGHLIGHTS = [
   { icon: TrendingUp, title: 'Run-rate forecasting', body: 'Project month-end spend from live daily burn.' },
@@ -18,65 +19,45 @@ const HIGHLIGHTS = [
 
 export default function LoginPage() {
   const router = useRouter();
-  const [mode, setMode] = useState<Mode>('signin');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [view, setView] = useState<View>('signin');
+  const [checkingSession, setCheckingSession] = useState(isSupabaseConfigured);
 
-  const resolveRedirect = () => {
+  const resolveRedirect = useCallback(() => {
     if (typeof window === 'undefined') return '/';
     const target = new URLSearchParams(window.location.search).get('redirect');
     return target && target.startsWith('/') ? target : '/';
-  };
+  }, []);
 
-  const goToApp = () => {
-    router.push(resolveRedirect());
+  const goToApp = useCallback(() => {
+    router.replace(resolveRedirect());
     router.refresh();
-  };
+  }, [router, resolveRedirect]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-    setMessage(null);
+  const continueAsGuest = useCallback(() => {
+    enterGuestMode();
+    router.replace(resolveRedirect());
+    router.refresh();
+  }, [router, resolveRedirect]);
 
-    if (!isSupabaseConfigured) {
-      setError(
-        'Supabase is not configured. Add NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY to .env.local.'
-      );
-      return;
-    }
-
-    setBusy(true);
-    const supabase = createClient();
-
-    try {
-      if (mode === 'signup') {
-        const { data, error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
-        });
-        if (error) throw error;
-        if (data.session) {
-          // Email confirmation is disabled — the user is already signed in.
-          goToApp();
-        } else {
-          setMessage('Check your inbox to confirm your email, then sign in.');
-          setMode('signin');
-        }
-      } else {
-        const { error } = await supabase.auth.signInWithPassword({ email, password });
-        if (error) throw error;
-        goToApp();
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Authentication failed');
-    } finally {
-      setBusy(false);
-    }
-  };
+  // If a session already exists, skip the form entirely — never flash it.
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    let cancelled = false;
+    getSupabaseClient()
+      .auth.getSession()
+      .then(({ data: { session } }) => {
+        if (cancelled) return;
+        if (session) goToApp();
+        else setCheckingSession(false);
+      })
+      .catch((err) => {
+        console.error('[auth] getSession on /login failed:', err);
+        if (!cancelled) setCheckingSession(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [goToApp]);
 
   return (
     <div className="grid min-h-screen bg-slate-950 lg:grid-cols-2">
@@ -143,73 +124,42 @@ export default function LoginPage() {
             <span className="text-[15px] font-bold tracking-tight text-white">TakaRunway</span>
           </div>
 
-          <h2 className="text-xl font-bold text-white">
-            {mode === 'signin' ? 'Welcome back' : 'Create your account'}
-          </h2>
-          <p className="mt-1 text-sm text-slate-400">
-            {mode === 'signin'
-              ? 'Sign in to sync your ledger to Supabase.'
-              : 'Start syncing your ledger across devices.'}
-          </p>
+          {!isSupabaseConfigured ? (
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-xs text-amber-200">
+              Supabase is not configured. Set <code>NEXT_PUBLIC_SUPABASE_URL</code> and{' '}
+              <code>NEXT_PUBLIC_SUPABASE_ANON_KEY</code>, then reload. The app still runs in local
+              demo mode without them.
+            </div>
+          ) : checkingSession ? (
+            <div className="flex items-center gap-2 py-10 text-sm text-slate-400">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Checking your session…
+            </div>
+          ) : view === 'signin' ? (
+            <SignIn onSwitchToSignUp={() => setView('signup')} onSignedIn={goToApp} />
+          ) : (
+            <SignUp onSwitchToSignIn={() => setView('signin')} onSignedIn={goToApp} />
+          )}
 
-          <form onSubmit={handleSubmit} className="mt-6 space-y-4">
-            <Field label="Email" htmlFor="login-email">
-              <Input
-                id="login-email"
-                type="email"
-                required
-                autoComplete="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="h-10"
-              />
-            </Field>
-
-            <Field label="Password" htmlFor="login-password">
-              <Input
-                id="login-password"
-                type="password"
-                required
-                minLength={6}
-                autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="h-10"
-              />
-            </Field>
-
-            {error && (
-              <p className="rounded-lg border border-rose-500/30 bg-rose-500/10 px-3 py-2 text-xs text-rose-300">
-                {error}
+          {!checkingSession && (
+            <>
+              <div className="my-5 flex items-center gap-3 text-[11px] uppercase tracking-wider text-slate-600">
+                <span className="h-px flex-1 bg-slate-800" />
+                or
+                <span className="h-px flex-1 bg-slate-800" />
+              </div>
+              <button
+                type="button"
+                onClick={continueAsGuest}
+                className="w-full rounded-lg border border-slate-700 bg-slate-900 px-3 py-2.5 text-xs font-semibold text-slate-200 transition hover:bg-slate-800 hover:text-white"
+              >
+                Continue as guest
+              </button>
+              <p className="mt-2 text-center text-[11px] text-slate-600">
+                Explore with sample data — nothing is saved. Sign in later to sync your own ledger.
               </p>
-            )}
-            {message && (
-              <p className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-300">
-                {message}
-              </p>
-            )}
-
-            <Button type="submit" size="md" disabled={busy} className="w-full">
-              {busy && <Loader2 className="h-4 w-4 animate-spin" />}
-              {mode === 'signin' ? 'Sign in' : 'Sign up'}
-            </Button>
-          </form>
-
-          <button
-            type="button"
-            onClick={() => {
-              setMode(mode === 'signin' ? 'signup' : 'signin');
-              setError(null);
-              setMessage(null);
-            }}
-            className={cn(
-              'mt-4 w-full text-center text-xs text-slate-400 transition hover:text-slate-200'
-            )}
-          >
-            {mode === 'signin'
-              ? "Don't have an account? Sign up"
-              : 'Already have an account? Sign in'}
-          </button>
+            </>
+          )}
         </div>
       </div>
     </div>

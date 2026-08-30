@@ -2,7 +2,8 @@
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { createClient, isSupabaseConfigured } from '@/lib/supabase/client';
+import { getSupabaseClient, isSupabaseConfigured } from '@/lib/supabase/client';
+import { exitGuestMode } from '@/lib/guest';
 import { useLedgerStore } from '@/store/ledgerStore';
 
 type AuthContextValue = {
@@ -41,23 +42,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setReady(true);
       return;
     }
-    const supabase = createClient();
+    const supabase = getSupabaseClient();
 
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      setEmail(user?.email ?? null);
-      setReady(true);
-      if (user) enableRemote();
-    });
+    // Restore any persisted session on mount.
+    supabase.auth
+      .getSession()
+      .then(({ data: { session } }) => {
+        setEmail(session?.user?.email ?? null);
+        if (session?.user) {
+          exitGuestMode(); // a real session supersedes guest mode
+          enableRemote();
+        }
+      })
+      .catch((err) => {
+        console.error('[auth] getSession failed:', err);
+      })
+      .finally(() => setReady(true));
 
+    // React to auth changes for the lifetime of the app; unsubscribe on unmount.
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       const user = session?.user ?? null;
       setEmail(user?.email ?? null);
-      if (user) {
-        enableRemote();
-      } else {
+
+      if (event === 'SIGNED_IN' || event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') {
+        if (user) {
+          exitGuestMode();
+          enableRemote();
+        }
+      } else if (event === 'SIGNED_OUT') {
         disableRemote();
-        // Session expired / revoked while using the app — bounce to login.
-        if (event === 'SIGNED_OUT') {
+        // Session ended while using the app — bounce to login.
+        if (window.location.pathname !== '/login') {
           router.replace(`/login?redirect=${encodeURIComponent(window.location.pathname)}`);
         }
       }
@@ -70,11 +85,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!isSupabaseConfigured || signingOut) return;
     setSigningOut(true);
     try {
-      const supabase = createClient();
-      await supabase.auth.signOut();
+      const { error } = await getSupabaseClient().auth.signOut();
+      if (error) console.error('[auth] signOut error:', error);
       disableRemote();
       router.replace('/login');
       router.refresh();
+    } catch (err) {
+      console.error('[auth] signOut unexpected error:', err);
     } finally {
       setSigningOut(false);
     }

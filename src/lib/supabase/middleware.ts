@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
+import { GUEST_COOKIE } from '@/lib/guest';
 
 /**
  * Refreshes the Supabase auth session on every request and gates the app:
@@ -58,6 +59,8 @@ export async function updateSession(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
   const isAuthRoute = pathname === '/login' || pathname.startsWith('/auth');
   const isApi = pathname.startsWith('/api');
+  // Guest mode: let the request through without a session (local demo data only).
+  const isGuest = request.cookies.get(GUEST_COOKIE)?.value === '1';
 
   /** Carry any refreshed auth cookies onto a redirect response. */
   const withCookies = (redirect: NextResponse) => {
@@ -65,7 +68,7 @@ export async function updateSession(request: NextRequest) {
     return redirect;
   };
 
-  if (!user && !isAuthRoute && !isApi) {
+  if (!user && !isGuest && !isAuthRoute && !isApi) {
     const target = request.nextUrl.clone();
     target.pathname = '/login';
     target.search = '';
