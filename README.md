@@ -213,7 +213,7 @@ npx tsx scripts/verify-engine.ts
 
 ## Contributions
 
-- **[Rabbi Islam Emon](https://github.com/iamrabbiislamemon)** — Core Developer
+
 - **[Shamiul Islam Riyad](https://github.com/shamiulriyad)** — Core Developer
 - **[Sayem Rahman](https://github.com/SayemR0018)** — Core Developer
 - **[Rabbi Islam Emon](https://github.com/iamrabbiislamemon)** — Core Developer
