@@ -3,6 +3,21 @@ import { Expense, Pocket, CalculatedRunway, WrittenInsight } from '@/types/ledge
 import { BENCHMARK_CASES } from '@/data/benchmarks';
 import { calculateRunway } from '@/lib/calculations';
 import { generateDynamicInsights } from '@/lib/insights';
+import * as expensesApi from '@/lib/api/expenses';
+import { ExpenseInput } from '@/types/database';
+
+/** Map an app Expense (or partial) to the API's input shape. */
+function toExpenseInput(e: Partial<Expense>): Partial<ExpenseInput> {
+  const input: Partial<ExpenseInput> = {};
+  if (e.date !== undefined) input.date = e.date;
+  if (e.category !== undefined) input.category = e.category;
+  if (e.shop !== undefined) input.shop = e.shop;
+  if (e.amount_bdt !== undefined) input.amount_bdt = e.amount_bdt;
+  if (e.isRecurring !== undefined) input.isRecurring = e.isRecurring;
+  if (e.notes !== undefined) input.notes = e.notes ?? null;
+  if (e.receiptConfidence !== undefined) input.receiptConfidence = e.receiptConfidence ?? null;
+  return input;
+}
 
 interface LedgerState {
   // Core Configuration
@@ -15,6 +30,11 @@ interface LedgerState {
   pockets: Pocket[];
   whatIfCuts: Record<string, number>; // 0.00 to 0.50
 
+  // Supabase sync
+  remoteEnabled: boolean; // true once a signed-in user is detected
+  remoteLoading: boolean;
+  syncError: string | null;
+
   // UI States
   isOCRModalOpen: boolean;
   isAddExpenseModalOpen: boolean;
@@ -25,6 +45,9 @@ interface LedgerState {
   selectedCategoryFilter: string;
 
   // Actions
+  enableRemote: () => Promise<void>;
+  disableRemote: () => void;
+  refreshRemoteExpenses: () => Promise<void>;
   loadBenchmarkCase: (caseId: string) => void;
   setSalary: (salary: number) => void;
   setToday: (todayStr: string) => void;
@@ -65,6 +88,10 @@ export const useLedgerStore = create<LedgerState>((set, get) => ({
   pockets: JSON.parse(JSON.stringify(defaultCase.pockets)),
   whatIfCuts: {},
 
+  remoteEnabled: false,
+  remoteLoading: false,
+  syncError: null,
+
   isOCRModalOpen: false,
   isAddExpenseModalOpen: false,
   isAddPocketModalOpen: false,
@@ -72,6 +99,29 @@ export const useLedgerStore = create<LedgerState>((set, get) => ({
   selectedPocketForDPS: null,
   searchQuery: '',
   selectedCategoryFilter: 'ALL',
+
+  enableRemote: async () => {
+    set({ remoteEnabled: true });
+    await get().refreshRemoteExpenses();
+  },
+
+  disableRemote: () => {
+    set({ remoteEnabled: false, syncError: null });
+  },
+
+  refreshRemoteExpenses: async () => {
+    if (!get().remoteEnabled) return;
+    set({ remoteLoading: true, syncError: null });
+    try {
+      const expenses = await expensesApi.listExpenses();
+      set({ expenses, remoteLoading: false });
+    } catch (err) {
+      set({
+        remoteLoading: false,
+        syncError: err instanceof Error ? err.message : 'Failed to load expenses',
+      });
+    }
+  },
 
   loadBenchmarkCase: (caseId: string) => {
     const selected = BENCHMARK_CASES[caseId];
@@ -103,26 +153,68 @@ export const useLedgerStore = create<LedgerState>((set, get) => ({
   },
 
   addExpense: (expenseData) => {
-    const newId = `E${Date.now().toString().slice(-4)}`;
-    const newExpense: Expense = {
-      ...expenseData,
-      id: newId,
-    };
-    set(state => ({
-      expenses: [newExpense, ...state.expenses],
-    }));
+    const tempId = `tmp-${Date.now().toString(36)}`;
+    const optimistic: Expense = { ...expenseData, id: tempId };
+    set(state => ({ expenses: [optimistic, ...state.expenses], syncError: null }));
+
+    if (!get().remoteEnabled) return;
+
+    expensesApi
+      .createExpense(toExpenseInput(expenseData) as ExpenseInput)
+      .then(saved => {
+        set(state => ({
+          expenses: state.expenses.map(e => (e.id === tempId ? saved : e)),
+        }));
+      })
+      .catch(err => {
+        set(state => ({
+          expenses: state.expenses.filter(e => e.id !== tempId),
+          syncError: err instanceof Error ? err.message : 'Failed to save expense',
+        }));
+      });
   },
 
   updateExpense: (id, updated) => {
+    const prev = get().expenses.find(e => e.id === id);
     set(state => ({
-      expenses: state.expenses.map(e => e.id === id ? { ...e, ...updated } : e),
+      expenses: state.expenses.map(e => (e.id === id ? { ...e, ...updated } : e)),
+      syncError: null,
     }));
+
+    if (!get().remoteEnabled || id.startsWith('tmp-')) return;
+
+    expensesApi
+      .updateExpense(id, toExpenseInput(updated))
+      .then(saved => {
+        set(state => ({
+          expenses: state.expenses.map(e => (e.id === id ? saved : e)),
+        }));
+      })
+      .catch(err => {
+        set(state => ({
+          expenses: prev
+            ? state.expenses.map(e => (e.id === id ? prev : e))
+            : state.expenses,
+          syncError: err instanceof Error ? err.message : 'Failed to update expense',
+        }));
+      });
   },
 
   deleteExpense: (id) => {
+    const prev = get().expenses;
     set(state => ({
       expenses: state.expenses.filter(e => e.id !== id),
+      syncError: null,
     }));
+
+    if (!get().remoteEnabled || id.startsWith('tmp-')) return;
+
+    expensesApi.deleteExpense(id).catch(err => {
+      set({
+        expenses: prev,
+        syncError: err instanceof Error ? err.message : 'Failed to delete expense',
+      });
+    });
   },
 
   addPocket: (pocketData) => {
