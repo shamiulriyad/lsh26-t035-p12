@@ -224,3 +224,5 @@ npx tsx scripts/verify-engine.ts
 ## License
 
 [MIT](./LICENSE) © 2026 Riyad
+
+Third-party dependency licenses and notices: [`LICENSES.md`](./LICENSES.md).
