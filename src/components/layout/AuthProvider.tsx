@@ -9,6 +9,7 @@ type AuthContextValue = {
   configured: boolean;
   ready: boolean;
   email: string | null;
+  signingOut: boolean;
   remoteLoading: boolean;
   syncError: string | null;
   refresh: () => void;
@@ -19,8 +20,9 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 /**
  * Bridges Supabase auth state into the ledger store (remote sync on/off) and
- * exposes it to the shell chrome. This preserves the effect that previously
- * lived in <AuthStatus />.
+ * exposes it to the shell chrome. The dashboard is gated by middleware, so if
+ * this provider renders the user is authenticated (or Supabase is unconfigured
+ * and the app runs in local demo mode).
  */
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const router = useRouter();
@@ -32,6 +34,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const [email, setEmail] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
@@ -46,22 +49,35 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (user) enableRemote();
     });
 
-    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       const user = session?.user ?? null;
       setEmail(user?.email ?? null);
-      if (user) enableRemote();
-      else disableRemote();
+      if (user) {
+        enableRemote();
+      } else {
+        disableRemote();
+        // Session expired / revoked while using the app — bounce to login.
+        if (event === 'SIGNED_OUT') {
+          router.replace(`/login?redirect=${encodeURIComponent(window.location.pathname)}`);
+        }
+      }
     });
 
     return () => sub.subscription.unsubscribe();
-  }, [enableRemote, disableRemote]);
+  }, [enableRemote, disableRemote, router]);
 
   const signOut = async () => {
-    if (!isSupabaseConfigured) return;
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    disableRemote();
-    router.refresh();
+    if (!isSupabaseConfigured || signingOut) return;
+    setSigningOut(true);
+    try {
+      const supabase = createClient();
+      await supabase.auth.signOut();
+      disableRemote();
+      router.replace('/login');
+      router.refresh();
+    } finally {
+      setSigningOut(false);
+    }
   };
 
   return (
@@ -70,6 +86,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         configured: isSupabaseConfigured,
         ready,
         email,
+        signingOut,
         remoteLoading,
         syncError,
         refresh: () => refreshRemoteExpenses(),

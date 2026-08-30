@@ -10,13 +10,15 @@ import {
   LogIn,
   RefreshCw,
   CloudOff,
+  Loader2,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuth } from './AuthProvider';
 import { userFromEmail } from './userDisplay';
 
 export const ProfileMenu: React.FC<{ onOpenAccount: () => void }> = ({ onOpenAccount }) => {
-  const { configured, ready, email, remoteLoading, syncError, refresh, signOut } = useAuth();
+  const { configured, ready, email, signingOut, remoteLoading, syncError, refresh, signOut } =
+    useAuth();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const user = userFromEmail(email);
@@ -130,14 +132,22 @@ export const ProfileMenu: React.FC<{ onOpenAccount: () => void }> = ({ onOpenAcc
               <button
                 type="button"
                 role="menuitem"
-                className={cn(item, 'hover:bg-rose-500/10 hover:text-rose-300')}
+                disabled={signingOut}
+                className={cn(
+                  item,
+                  'hover:bg-rose-500/10 hover:text-rose-300 disabled:pointer-events-none disabled:opacity-60'
+                )}
                 onClick={() => {
                   setOpen(false);
                   signOut();
                 }}
               >
-                <LogOut className="h-4 w-4" />
-                Log out
+                {signingOut ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <LogOut className="h-4 w-4" />
+                )}
+                {signingOut ? 'Signing out…' : 'Log out'}
               </button>
             ) : (
               <Link

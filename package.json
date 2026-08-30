@@ -5,8 +5,12 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start",
+    "start": "node server.js",
+    "start:next": "next start",
     "lint": "next lint"
+  },
+  "engines": {
+    "node": ">=18.18.0"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.5",

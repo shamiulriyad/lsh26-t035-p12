@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { UserCog, LogOut, LogIn, CloudOff, Cloud, RefreshCw } from 'lucide-react';
+import { UserCog, LogOut, LogIn, CloudOff, Cloud, RefreshCw, Loader2 } from 'lucide-react';
 import Link from 'next/link';
 import { Modal, Field, Input, Select, Button, Badge } from '@/components/ui';
 import { useLedgerStore } from '@/store/ledgerStore';
@@ -14,7 +14,7 @@ export const AccountModal: React.FC<{ open: boolean; onClose: () => void }> = ({
   open,
   onClose,
 }) => {
-  const { configured, email, remoteLoading, syncError, refresh, signOut } = useAuth();
+  const { configured, email, signingOut, remoteLoading, syncError, refresh, signOut } = useAuth();
   const user = userFromEmail(email);
 
   const {
@@ -91,13 +91,18 @@ export const AccountModal: React.FC<{ open: boolean; onClose: () => void }> = ({
                 <Button
                   size="xs"
                   variant="ghost"
+                  disabled={signingOut}
                   onClick={async () => {
                     await signOut();
                     onClose();
                   }}
                 >
-                  <LogOut className="h-3.5 w-3.5" />
-                  Sign out
+                  {signingOut ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <LogOut className="h-3.5 w-3.5" />
+                  )}
+                  {signingOut ? 'Signing out…' : 'Sign out'}
                 </Button>
               </>
             )}

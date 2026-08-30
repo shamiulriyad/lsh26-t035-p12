@@ -2,14 +2,15 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { LogIn, LogOut, CloudOff, RefreshCw, CircleAlert } from 'lucide-react';
+import { LogIn, LogOut, CloudOff, RefreshCw, CircleAlert, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { Spinner } from '@/components/ui';
 import { useAuth } from './AuthProvider';
 import { userFromEmail } from './userDisplay';
 
 export const SidebarProfile: React.FC<{ showLabels: boolean }> = ({ showLabels }) => {
-  const { configured, ready, email, remoteLoading, syncError, refresh, signOut } = useAuth();
+  const { configured, ready, email, signingOut, remoteLoading, syncError, refresh, signOut } =
+    useAuth();
   const user = userFromEmail(email);
 
   if (!configured) {
@@ -99,10 +100,15 @@ export const SidebarProfile: React.FC<{ showLabels: boolean }> = ({ showLabels }
               <button
                 type="button"
                 onClick={signOut}
+                disabled={signingOut}
                 title="Sign out"
-                className="rounded-md p-1.5 text-slate-500 transition hover:bg-slate-800 hover:text-rose-300"
+                className="rounded-md p-1.5 text-slate-500 transition hover:bg-slate-800 hover:text-rose-300 disabled:opacity-60"
               >
-                <LogOut className="h-3.5 w-3.5" />
+                {signingOut ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <LogOut className="h-3.5 w-3.5" />
+                )}
               </button>
             </div>
           </>

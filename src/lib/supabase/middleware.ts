@@ -14,9 +14,19 @@ import { NextResponse, type NextRequest } from 'next/server';
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
 
+  // The health probe must never depend on Supabase being reachable.
+  if (request.nextUrl.pathname === '/health') return response;
+
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!url || !anonKey) return response;
+  // Missing config -> local demo mode, no auth. Name the vars so a misconfigured
+  // deploy is obvious in the logs instead of silently running unauthenticated.
+  if (!url || !anonKey) {
+    console.warn(
+      '[middleware] NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY not set — running without auth'
+    );
+    return response;
+  }
 
   const supabase = createServerClient(url, anonKey, {
     cookies: {
@@ -33,10 +43,17 @@ export async function updateSession(request: NextRequest) {
     },
   });
 
-  // Touching getUser() triggers the token refresh when needed.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // Touching getUser() triggers the token refresh when needed. A network failure
+  // to Supabase must not turn every route into a 500 — log it and fall back to
+  // the "signed out" path (same as local demo mode) so the site stays up.
+  let user: import('@supabase/supabase-js').User | null = null;
+  try {
+    const { data } = await supabase.auth.getUser();
+    user = data.user;
+  } catch (err) {
+    console.error('[middleware] supabase.auth.getUser() failed, treating as signed out:', err);
+    return response;
+  }
 
   const { pathname, search } = request.nextUrl;
   const isAuthRoute = pathname === '/login' || pathname.startsWith('/auth');
